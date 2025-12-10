@@ -1,13 +1,12 @@
 from flask import Flask, render_template_string, request, redirect, url_for, session
 import os
 import urllib.parse
-import configparser
-import hashlib
 import csv
 from datetime import datetime
 import argparse
 import getpass
 import logging
+from utils import verify_user_credentials, add_user, delete_user
 
 data_path = os.path.join(os.path.dirname(__file__), "data")
 
@@ -18,45 +17,6 @@ app.secret_key = 'your_secret_key'  # Replace with a random secret key
 # Configure logging
 logging.basicConfig(filename='login.log', level=logging.INFO, format='%(asctime)s - %(username)s - %(message)s')
 
-# Function to hash the password
-def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
-
-# Function to verify user credentials
-def verify_user_credentials(username, password):
-    user_file = os.path.join('users', f'{username}.conf')
-    if not os.path.exists(user_file):
-        return False
-    config = configparser.ConfigParser()
-    config.read(user_file, encoding='utf-8')
-    stored_password = config.get('User', 'password')
-    return stored_password == hash_password(password)
-
-# Function to add a new user
-def add_user(username, password):
-    user_file = os.path.join('users', f'{username}.conf')
-    if os.path.exists(user_file):
-        print(f"User {username} already exists.")
-        return False
-    config = configparser.ConfigParser()
-    config['User'] = {
-        'username': username,
-        'password': hash_password(password)
-    }
-    with open(user_file, 'w', encoding='utf-8') as configfile:
-        config.write(configfile)
-    print(f"User {username} created successfully.")
-    return True
-
-# Function to delete a user
-def delete_user(username):
-    user_file = os.path.join('users', f'{username}.conf')
-    if not os.path.exists(user_file):
-        print(f"User {username} does not exist.")
-        return False
-    os.remove(user_file)
-    print(f"User {username} deleted successfully.")
-    return True
 
 # HTML template for the login form
 login_template = '''
@@ -66,16 +26,49 @@ login_template = '''
     <title>Login</title>
 </head>
 <body>
-    <h1>Login</h1>
-    <form action="/login" method="post">
-        <label for="username">Username:</label>
-        <input type="text" id="username" name="username" required>
-        <br>
-        <label for="password">Password:</label>
-        <input type="password" id="password" name="password" required>
-        <br>
-        <input type="submit" value="Login">
-    </form>
+    <style>
+        * {
+            box-sizing: border-box;}
+
+        h1 {
+            text-align: center;
+        }
+
+        .container {
+            max-width: 300px;
+            margin: auto;
+            padding: 20px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+
+        input[type=text], input[type=password] {
+            width: 100%;
+            padding: 10px;
+            margin: 5px 0 10px 0;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+        }
+
+        .submit-btn {
+            width: 100%;
+            padding: 10px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+    </style>
+
+    <div class="container">
+        <h1>Login</h1>
+        <form action="/login" method="post">
+            <label for="username">Username:</label>
+            <input type="text" id="username" name="username" required>
+            <br>
+            <label for="password">Password:</label>
+            <input type="password" id="password" name="password" required>
+            <input class="submit-btn" type="submit" value="Login">
+        </form>
+    </div>
 </body>
 </html>
 '''
@@ -88,12 +81,27 @@ calendar_template = '''
     <title>Select Date</title>
 </head>
 <body>
-    <h1>Select a Date</h1>
-    <form action="/display" method="post">
-        <label for="date">Date:</label>
-        <input type="date" id="date" name="date">
-        <input type="submit" value="Submit">
-    </form>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        .container {
+            max-width: 300px;
+            margin: auto;
+            padding: 20px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+    </style>
+    <div class="container">
+        <h1>Select a Date</h1>
+        <form action="/display" method="post">
+            <label for="date">Date:</label>
+            <input type="date" id="date" name="date">
+            <input type="submit" value="Submit">
+        </form>
+    </div>
 </body>
 </html>
 '''
@@ -120,14 +128,28 @@ html_template = """
             text-align: left;
         }
     </style>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 </head>
 <body>
     {% if columns and rows %}
     <h2>Tracking data</h2>
-    <form action="/view_path" method="get">
-        <input type="hidden" name="lat_lng" value="{{ lat_lng }}">
-        <button type="submit">View Path on Google Maps</button>
-    </form>
+
+    <div id="map" style="height: 60vh"></div>
+    <script>
+        const map = L.map("map").setView([10.762622, 106.660172], 13);
+
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+            maxZoom: 19,
+        }).addTo(map);
+        
+        const rows = {{ rows | tojson }};
+        const coords = rows.map(r => [Number(r[2]), Number(r[3])]);
+
+        L.polyline(coords, { color: "red" }).addTo(map);
+    </script>
+    
     <table>
         <thead>
             <tr>

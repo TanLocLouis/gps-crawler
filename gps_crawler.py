@@ -1,13 +1,11 @@
 import requests
 import time
-import csv
 import os
-import hashlib
-import configparser
 import argparse
 import getpass
 from datetime import datetime
 from dotenv import load_dotenv
+from utils import dict_to_csv, hash_password, store_user_credentials, delete_user_credentials
 
 base_url = "https://gps.toanthangjsc.vn/"
 data_path = os.path.join(os.path.dirname(__file__), "data")
@@ -20,28 +18,6 @@ VEH_ID = os.getenv("VEH_ID")
 SERVER_IP = os.getenv("SERVER_IP")
 
 
-# Function to hash the password
-def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
-
-# Function to store user credentials
-def store_user_credentials(username, hashed_password):
-    if not os.path.exists('users'):
-        os.makedirs('users')
-    user_file = os.path.join('users', f'{username}.conf')
-    config = configparser.ConfigParser()
-    config['User'] = {'username': username, 'password': hashed_password}
-    with open(user_file, 'w') as configfile:
-        config.write(configfile)
-
-# Function to delete user credentials
-def delete_user_credentials(username):
-    user_file = os.path.join('users', f'{username}.conf')
-    if os.path.exists(user_file):
-        os.remove(user_file)
-        print(f"User {username} deleted successfully.")
-    else:
-        print(f"User {username} does not exist.")
 
 # Argument parser setup
 parser = argparse.ArgumentParser(description='GPS Crawler')
@@ -63,32 +39,6 @@ if args.rm:
     delete_user_credentials(username)
     exit()
 
-
-
-def dict_to_csv(data, output_file):
-    """
-    Convert a nested dictionary into a CSV file.
-    
-    Args:
-        data (dict): The input dictionary to be converted.
-        output_file (str): Path to the output CSV file.
-    """
-    
-    # Open the CSV file for writing
-    # Create folder if it does not exist
-    if not os.path.exists(data_path):
-        os.makedirs(data_path)
-    file_path = data_path + "/" + output_file
-    with open(file_path, mode='a', newline='', encoding='utf-8') as file:
-        writer = csv.writer(file)
-        
-        # Write the headers (keys) only if the file is empty
-        if file.tell() == 0:
-            writer.writerow(data.keys())
-        
-        # Write the values (values) to the CSV
-        writer.writerow(data.values())
-
 def login():
     # Step 1: GET to get session ID
     # Define the headers for the request
@@ -108,8 +58,12 @@ def login():
         "Accept-Language": "en-US,en;q=0.9",
     }
 
-    # Send the GET request without following redirects
-    response = requests.get(base_url, headers=headers, allow_redirects=False)
+    try:
+        # Send the GET request without following redirects
+        response = requests.get(base_url, headers=headers, allow_redirects=False)
+    except Exception as e:
+        print("Failed to connect to the server.")
+        return
 
     # Output the response details
     print("Status Code:", response.status_code)
@@ -144,12 +98,15 @@ def login():
         "Type": 0
     }
 
-    login_response = requests.post(login_url, headers=headers_post_login, json=login_payload)
-    if login_response.status_code == 200:
-        print("Login successful.")
-    else:
-        print("Login failed.")
-        exit()
+    try:
+        login_response = requests.post(login_url, headers=headers_post_login, json=login_payload)
+        if login_response.status_code == 200:
+                print("Login successful.")
+        else:
+                print("Login failed.")
+    except Exception as e:
+        print("Failed to connect to the server during login.")
+        return
 
     return session_cookie
 
@@ -199,41 +156,39 @@ def get_info(session_cookie):
                 print("Failed to retrieve vehicle information.")
     except:
         print("Failed to retrieve vehicle information.")
-        return [None, None]
+        return
+
 
 def main():
     # Login to the website to get the session cookie
     # This cookie will expire after 20 mins of inactivity
-    session_cookie = login()
-    last_refresh = time.time()
+    last_refresh = 0; 
 
     previous_location = [0, 0]
     # Continuously get vehicle information every 10 seconds
     while True:
+        time.sleep(10)
+
         current_time = time.time()
         if current_time - last_refresh > 600:
-            try:
-                session_cookie = login()
+            session_cookie = login()
+            if session_cookie:
+                print("Session refreshed.")
                 last_refresh = current_time
-            except:
-                print("Failed to retrieve server session token.")
                 time.sleep(10)
-
-
-        try:
-            result = get_info(session_cookie)
-            if result is None:
+            else:
+                print("Failed to refresh session.")
                 continue
 
-            [flat_data, filename_date] = result
-            current_location = [flat_data.get('lat'), flat_data.get('lng')]
-            if current_location != previous_location:
-                dict_to_csv(flat_data, filename_date)
-                previous_location = current_location
-            time.sleep(10)
-        except:
-            print("Failed to retrieve vehicle information.")
-            time.sleep(10)
+        result = get_info(session_cookie)
+        if result is None:
+            continue
+
+        [flat_data, filename_date] = result
+        current_location = [flat_data.get('lat'), flat_data.get('lng')]
+        if current_location != previous_location:
+            dict_to_csv(flat_data, filename_date)
+            previous_location = current_location
 
 if __name__ == "__main__":
     main()
